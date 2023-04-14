@@ -982,6 +982,11 @@ func (s *RegionRequestSender) SendReqCtx(
 			if tryTimes%100 == 0 {
 				logutil.Logger(bo.GetCtx()).Warn("retry", zap.Uint64("region", regionID.GetID()), zap.Int("times", tryTimes))
 			}
+			if req.StaleRead {
+				// retry on the leader should not use stale read to avoid possible DataIsNotReady error as it always can serve any read
+				// note that StaleRead retry always goes to the leader thanks to storeSelectorOp.leaderOnly set by replica selector
+				req.StaleRead = false
+			}
 		}
 
 		rpcCtx, err = s.getRPCContext(bo, req, regionID, et, opts...)
@@ -1017,12 +1022,6 @@ func (s *RegionRequestSender) SendReqCtx(
 				h := hook.(func(*tikvrpc.Request))
 				h(req)
 			}
-		}
-
-		if retryTimes > 0 && s.replicaSelector != nil && s.replicaSelector.regionStore != nil &&
-			s.replicaSelector.targetIdx == s.replicaSelector.regionStore.workTiKVIdx {
-			// retry on the leader should not use stale read to avoid possible DataIsNotReady error as it always can serve any read
-			req.StaleRead = false
 		}
 
 		var retry bool
