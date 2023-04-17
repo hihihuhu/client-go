@@ -523,6 +523,11 @@ type accessFollower struct {
 }
 
 func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector) (*RPCContext, error) {
+<<<<<<< HEAD
+=======
+	replicaSize := len(selector.replicas)
+	resetStaleRead := false
+>>>>>>> 69c9e18 (move all logic to #next and allow retry on the leader)
 	if state.lastIdx < 0 {
 		if state.tryLeader {
 			state.lastIdx = AccessIndex(rand.Intn(len(selector.replicas)))
@@ -543,6 +548,8 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 		// if txnScope is local, we will retry both other peers and the leader by the strategy of replicaSelector.
 		if state.isGlobalStaleRead {
 			WithLeaderOnly()(&state.option)
+			// retry on the leader should not use stale read flag to avoid possible DataIsNotReady error as it always can serve any read
+			resetStaleRead = true
 		}
 		state.lastIdx++
 	}
@@ -561,7 +568,7 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 			logutil.BgLogger().Warn("unable to find stores with given labels")
 		}
 		leader := selector.replicas[state.leaderIdx]
-		if leader.isEpochStale() || leader.isExhausted(1) {
+		if leader.isEpochStale() || (!state.option.leaderOnly && leader.isExhausted(1)) {
 			metrics.TiKVReplicaSelectorFailureCounter.WithLabelValues("exhausted").Inc()
 			selector.invalidateRegion()
 			return nil, nil
@@ -569,7 +576,27 @@ func (state *accessFollower) next(bo *retry.Backoffer, selector *replicaSelector
 		state.lastIdx = state.leaderIdx
 		selector.targetIdx = state.leaderIdx
 	}
+<<<<<<< HEAD
 	return selector.buildRPCContext(bo)
+=======
+	// Monitor the flows destination if selector is under `ReplicaReadPreferLeader` mode.
+	if state.option.preferLeader {
+		if selector.targetIdx != state.leaderIdx {
+			selector.replicas[selector.targetIdx].store.recordReplicaFlowsStats(toFollower)
+		} else {
+			selector.replicas[selector.targetIdx].store.recordReplicaFlowsStats(toLeader)
+		}
+	}
+	rpcCtx, err := selector.buildRPCContext(bo)
+	if err != nil || rpcCtx == nil {
+		return nil, err
+	}
+	if resetStaleRead {
+		staleRead := false
+		rpcCtx.contextPatcher.staleRead = &staleRead
+	}
+	return rpcCtx, nil
+>>>>>>> 69c9e18 (move all logic to #next and allow retry on the leader)
 }
 
 func (state *accessFollower) onSendFailure(bo *retry.Backoffer, selector *replicaSelector, cause error) {
@@ -981,11 +1008,6 @@ func (s *RegionRequestSender) SendReqCtx(
 			req.IsRetryRequest = true
 			if tryTimes%100 == 0 {
 				logutil.Logger(bo.GetCtx()).Warn("retry", zap.Uint64("region", regionID.GetID()), zap.Int("times", tryTimes))
-			}
-			if req.StaleRead {
-				// retry on the leader should not use stale read to avoid possible DataIsNotReady error as it always can serve any read
-				// note that StaleRead retry always goes to the leader thanks to storeSelectorOp.leaderOnly set by replica selector
-				req.StaleRead = false
 			}
 		}
 
@@ -1604,10 +1626,21 @@ func (s *RegionRequestSender) onRegionError(bo *retry.Backoffer, ctx *RPCContext
 			zap.Uint64("peer-id", regionErr.GetDataIsNotReady().GetPeerId()),
 			zap.Uint64("region-id", regionErr.GetDataIsNotReady().GetRegionId()),
 			zap.Uint64("safe-ts", regionErr.GetDataIsNotReady().GetSafeTs()),
+<<<<<<< HEAD
 			zap.Stringer("ctx", ctx))
 		err = bo.Backoff(retry.BoMaxDataNotReady, errors.New("data is not ready"))
 		if err != nil {
 			return false, err
+=======
+			zap.Stringer("ctx", ctx),
+		)
+		if !req.IsGlobalStaleRead() {
+			// only backoff local stale reads as global should retry immediately against the leader as a normal read
+			err = bo.Backoff(retry.BoMaxDataNotReady, errors.New("data is not ready"))
+			if err != nil {
+				return false, err
+			}
+>>>>>>> 69c9e18 (move all logic to #next and allow retry on the leader)
 		}
 		return true, nil
 	}

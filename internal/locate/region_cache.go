@@ -540,6 +540,32 @@ func (c *RPCContext) String() string {
 	return res
 }
 
+<<<<<<< HEAD
+=======
+type contextPatcher struct {
+	replicaRead   *bool
+	busyThreshold *time.Duration
+	staleRead     *bool
+}
+
+func (patcher *contextPatcher) applyTo(pbCtx *kvrpcpb.Context) {
+	if patcher.replicaRead != nil {
+		pbCtx.ReplicaRead = *patcher.replicaRead
+	}
+	if patcher.staleRead != nil {
+		pbCtx.StaleRead = *patcher.staleRead
+	}
+	if patcher.busyThreshold != nil {
+		millis := patcher.busyThreshold.Milliseconds()
+		if millis > 0 && millis <= math.MaxUint32 {
+			pbCtx.BusyThresholdMs = uint32(millis)
+		} else {
+			pbCtx.BusyThresholdMs = 0
+		}
+	}
+}
+
+>>>>>>> 69c9e18 (move all logic to #next and allow retry on the leader)
 type storeSelectorOp struct {
 	leaderOnly bool
 	labels     []*metapb.StoreLabel
